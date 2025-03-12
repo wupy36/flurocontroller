@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 52342a4d6f4332c41a118ee957266ffe
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 899208591, guid: 43a5003490d74aa458ebcd104038e17e, type: 3}
+  AlbedoMap: {fileID: 2300012, guid: 1b1d8c45e1e584240b13d1fc6fbb99a6, type: 3}
+  MetallicMap: {fileID: 2300014, guid: 1b1d8c45e1e584240b13d1fc6fbb99a6, type: 3}
+  OcclusionMap: {fileID: 2300016, guid: 1b1d8c45e1e584240b13d1fc6fbb99a6, type: 3}
+  EmissionMap: {instanceID: 0}
+  Smoothness: 0
+  GlossMapScale: 0.581
