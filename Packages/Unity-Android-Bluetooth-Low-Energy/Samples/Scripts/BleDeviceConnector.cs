@@ -5,8 +5,10 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 
-
-public class DeviceButton : MonoBehaviour
+/// <summary>
+/// Handles connecting to an individual BLE device and managing its connection state.
+/// </summary>
+public class BleDeviceConnector : MonoBehaviour
 {
     private string _deviceUuid = string.Empty;
     private string _deviceName = string.Empty;
@@ -25,10 +27,11 @@ public class DeviceButton : MonoBehaviour
     private Color _onConnectedColor;
     private Color _previousColor;
 
-    [SerializeField] private string _xRayReceiverTag = "XRayReceiver";
-    private XRayReceiver _xRayReceiver;
+    [SerializeField] private string _inputReceiverTag = "InputReceiver";
+    private BleInputReceiver _inputReceiver;
     
     private bool _isConnected = false;
+    private BleAutoConnector _bleInteractor; // Reference to the BLE interactor
 
     private ConnectToDevice _connectCommand;
     private ReadFromCharacteristic _readFromCharacteristic;
@@ -42,6 +45,12 @@ public class DeviceButton : MonoBehaviour
 
         _deviceUuidText.text = uuid;
         _deviceNameText.text = name;
+    }
+    
+    // Store reference to the BLE interactor
+    public void SetBleInteractor(BleAutoConnector interactor)
+    {
+        _bleInteractor = interactor;
     }
 
     public void Connect()
@@ -75,7 +84,12 @@ public class DeviceButton : MonoBehaviour
         _isConnected = true;
         _deviceButtonText.text = "Disconnect";
 
-        //SubscribeToExampleService();
+        // Notify the BLE interactor about successful connection
+        if (_bleInteractor != null)
+        {
+            _bleInteractor.OnDeviceConnected();
+        }
+
         ConnectToReceiver();
     }
 
@@ -85,28 +99,34 @@ public class DeviceButton : MonoBehaviour
 
         _isConnected = false;
         _deviceButtonText.text = "Connect";
+        
+        // Notify the BLE interactor about disconnection
+        if (_bleInteractor != null)
+        {
+            _bleInteractor.OnDeviceDisconnected();
+        }
     }
     
     private void ConnectToReceiver()
     {
-        // Attempt to find the ReceiverScript using the tag
-        GameObject receiverObject = GameObject.FindWithTag(_xRayReceiverTag);
+        // Attempt to find the InputReceiver using the tag
+        GameObject receiverObject = GameObject.FindWithTag(_inputReceiverTag);
         
         // Checking object found
         if (receiverObject == null)
         {
-            Debug.LogError("No GameObject found with the tag: " + _xRayReceiverTag);
+            Debug.LogError("No GameObject found with the tag: " + _inputReceiverTag);
             return;
         }
         
-        _xRayReceiver = receiverObject.GetComponent<XRayReceiver>();
+        _inputReceiver = receiverObject.GetComponent<BleInputReceiver>();
         // Checking Script
-        if (_xRayReceiver == null)
+        if (_inputReceiver == null)
         {
-            Debug.LogError("ReceiverScript not found on the GameObject with tag: " + _xRayReceiverTag);
+            Debug.LogError("BleInputReceiver not found on the GameObject with tag: " + _inputReceiverTag);
             return;
         }
         
-        _xRayReceiver.ReceiveUuid(_deviceUuid);
+        _inputReceiver.ReceiveUuid(_deviceUuid);
     }
 }

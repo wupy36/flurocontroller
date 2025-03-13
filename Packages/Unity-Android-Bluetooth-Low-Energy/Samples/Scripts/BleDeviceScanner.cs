@@ -5,7 +5,7 @@ using UnityEngine.Android;
 using Android.BLE;
 using Android.BLE.Commands;
 
-public class ControllerInteraction : MonoBehaviour
+public class BleDeviceScanner : MonoBehaviour
 {
     [SerializeField]
     private GameObject _deviceButton;
@@ -42,7 +42,7 @@ public class ControllerInteraction : MonoBehaviour
     
     private void OnDeviceFound(string name, string device)
     {
-        DeviceButton button = Instantiate(_deviceButton, _deviceList).GetComponent<DeviceButton>();
+        BleDeviceConnector button = Instantiate(_deviceButton, _deviceList).GetComponent<BleDeviceConnector>();
         button.Show(name, device);
     }
 }
