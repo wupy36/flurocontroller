@@ -37,6 +37,28 @@ public class TranslationController : MonoBehaviour
         None = 0,
         ButtonSet = 1
     }
+
+    [System.Serializable]
+    public enum ButtonSetIndex
+    {
+        Set1 = 0,
+        Set2 = 1,
+        Set3 = 2,
+        Set4 = 3
+    }
+
+    [System.Serializable]
+    public enum ButtonIndex
+    {
+        Button1 = 0,
+        Button2 = 1,
+        Button3 = 2,
+        Button4 = 3,
+        Button5 = 4,
+        Button6 = 5,
+        Button7 = 6,
+        Button8 = 7
+    }
     
     [System.Serializable]
     public class ButtonTranslationConfig
@@ -44,20 +66,25 @@ public class TranslationController : MonoBehaviour
         [Tooltip("Type of button control to use")]
         public ButtonControlType controlType = ButtonControlType.None;
         
-        [Tooltip("Button set index (1-4)")]
-        [Range(1, 4)]
-        public int buttonSetIndex = 1;
+        [Header("Positive Direction Control")]
+        [Tooltip("Button set for positive direction")]
+        public ButtonSetIndex posButtonSetIndex = ButtonSetIndex.Set1;
         
-        [Tooltip("Positive direction button bit (0-7)")]
-        [Range(0, 7)]
-        public int posButtonBit = 0;
+        [Tooltip("Button for positive direction")]
+        public ButtonIndex posButtonIndex = ButtonIndex.Button1;
         
-        [Tooltip("Negative direction button bit (0-7)")]
-        [Range(0, 7)]
-        public int negButtonBit = 1;
+        [Tooltip("Invert positive direction")]
+        public bool invertPosDirection = false;
+
+        [Header("Negative Direction Control")]
+        [Tooltip("Button set for negative direction")]
+        public ButtonSetIndex negButtonSetIndex = ButtonSetIndex.Set1;
         
-        [Tooltip("Invert button direction")]
-        public bool invertDirection = false;
+        [Tooltip("Button for negative direction")]
+        public ButtonIndex negButtonIndex = ButtonIndex.Button2;
+        
+        [Tooltip("Invert negative direction")]
+        public bool invertNegDirection = false;
     }
 
     [Header("Translation Configuration")]
@@ -87,6 +114,22 @@ public class TranslationController : MonoBehaviour
     [Tooltip("Button configuration for translation")]
     public ButtonTranslationConfig buttonControl = new ButtonTranslationConfig();
     
+    [Header("Deadzone Configuration")]
+    [Tooltip("Use custom deadzone settings for this controller")]
+    public bool useCustomDeadzone = false;
+    
+    [Tooltip("Deadzone start value (0-255)")]
+    [Range(0, 255)]
+    public byte deadZoneStart = 100;
+    
+    [Tooltip("Deadzone end value (0-255)")]
+    [Range(0, 255)]
+    public byte deadZoneEnd = 126;
+    
+    [Tooltip("Center value for joystick (0-255)")]
+    [Range(0, 255)]
+    public byte centerValue = 123;
+    
     [Header("Debug")]
     [Tooltip("Enable debug logs")]
     public bool debugMode = false;
@@ -95,7 +138,13 @@ public class TranslationController : MonoBehaviour
     private float _normalizedRate;
     private Vector3 _startPosition;
     private string _axisName;
+    private BleInputReadout inputReadout;
     
+    // Default deadzone values (for when custom is disabled)
+    private const byte DEFAULT_DEADZONE_START = 113;
+    private const byte DEFAULT_DEADZONE_END = 133;
+    private const byte DEFAULT_CENTER_VALUE = 123;
+
     private void Awake()
     {
         // Store starting position and calculate rate per frame
@@ -104,6 +153,71 @@ public class TranslationController : MonoBehaviour
         
         // Set axis name for debug
         _axisName = translationAxis.ToString();
+        
+        // Validate deadzone settings
+        ValidateDeadzoneSettings();
+    }
+    
+    private void ValidateDeadzoneSettings()
+    {
+        // Ensure deadzone values are in correct order
+        if (deadZoneStart > deadZoneEnd)
+        {
+            byte temp = deadZoneStart;
+            deadZoneStart = deadZoneEnd;
+            deadZoneEnd = temp;
+            
+            if (debugMode)
+            {
+                Debug.LogWarning($"Deadzone values were reversed on {gameObject.name}, fixed automatically.");
+            }
+        }
+        
+        // Ensure center value is within deadzone
+        if (centerValue < deadZoneStart || centerValue > deadZoneEnd)
+        {
+            // Set center to middle of deadzone
+            centerValue = (byte)((deadZoneStart + deadZoneEnd) / 2);
+            
+            if (debugMode)
+            {
+                Debug.LogWarning($"Center value was outside deadzone on {gameObject.name}, adjusted to {centerValue}.");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Register a input readout component for debugging
+    /// </summary>
+    public void RegisterReadout(BleInputReadout readout)
+    {
+        inputReadout = readout;
+        
+        // Register active controls
+        if (readout != null)
+        {
+            string controlName = gameObject.name;
+            string axisName = translationAxis.ToString();
+            
+            if (joystickIndex != JoystickIndex.None)
+            {
+                readout.RegisterActiveControl("Translation", controlName, axisName, joystickIndex.ToString());
+            }
+            
+            if (buttonControl.controlType != ButtonControlType.None)
+            {
+                string buttonInfo = $"{buttonControl.posButtonSetIndex}.{buttonControl.posButtonIndex}/" +
+                                    $"{buttonControl.negButtonSetIndex}.{buttonControl.negButtonIndex}";
+                readout.RegisterActiveControl("Translation", controlName + "_Buttons", axisName, buttonInfo);
+            }
+            
+            // Register deadzone info if custom
+            if (useCustomDeadzone)
+            {
+                string deadzoneInfo = $"DZ:{deadZoneStart}-{deadZoneEnd} C:{centerValue}";
+                readout.RegisterActiveControl("DeadzoneInfo", controlName, axisName, deadzoneInfo);
+            }
+        }
     }
     
     /// <summary>
@@ -128,32 +242,44 @@ public class TranslationController : MonoBehaviour
         // Process button input if configured
         if (buttonControl.controlType != ButtonControlType.None && buttonSets.Length >= 4)
         {
-            ProcessButtonTranslation(buttonSets[buttonControl.buttonSetIndex - 1]);
+            ProcessButtonTranslation(buttonSets);
         }
     }
     
     /// <summary>
     /// Process button input for translation
     /// </summary>
-    private void ProcessButtonTranslation(byte buttonSet)
+    private void ProcessButtonTranslation(byte[] buttonSets)
     {
-        bool posButtonPressed = (buttonSet & (1 << buttonControl.posButtonBit)) != 0;
-        bool negButtonPressed = (buttonSet & (1 << buttonControl.negButtonBit)) != 0;
+        // Get button states
+        bool posButtonPressed = (buttonSets[(int)buttonControl.posButtonSetIndex] & 
+                                (1 << (int)buttonControl.posButtonIndex)) != 0;
+        
+        bool negButtonPressed = (buttonSets[(int)buttonControl.negButtonSetIndex] & 
+                                (1 << (int)buttonControl.negButtonIndex)) != 0;
         
         float translationAmount = 0;
         
-        if (posButtonPressed && !negButtonPressed)
+        // Handle positive direction
+        if (posButtonPressed)
         {
-            translationAmount = _normalizedRate;
-        }
-        else if (negButtonPressed && !posButtonPressed)
-        {
-            translationAmount = -_normalizedRate;
+            float posAmount = _normalizedRate;
+            if (buttonControl.invertPosDirection)
+            {
+                posAmount *= -1;
+            }
+            translationAmount += posAmount;
         }
         
-        if (buttonControl.invertDirection)
+        // Handle negative direction
+        if (negButtonPressed)
         {
-            translationAmount *= -1;
+            float negAmount = -_normalizedRate;
+            if (buttonControl.invertNegDirection)
+            {
+                negAmount *= -1;
+            }
+            translationAmount += negAmount;
         }
         
         if (translationAmount != 0)
@@ -162,7 +288,7 @@ public class TranslationController : MonoBehaviour
         }
     }
     
-    /// <summary>
+   /// <summary>
     /// Apply translation to the object within limits
     /// </summary>
     private void ApplyTranslation(float amount)
@@ -182,14 +308,13 @@ public class TranslationController : MonoBehaviour
         // Calculate new position
         float newAxisPosition = currentAxisPosition + amount;
         
-        // Check boundaries
-        if ((newAxisPosition < minPosition && amount < 0) || 
-            (newAxisPosition > maxPosition && amount > 0))
+        // Check boundaries - FIXED LOGIC
+        if (newAxisPosition < minPosition || newAxisPosition > maxPosition)
         {
             if (debugMode)
             {
                 Debug.LogWarning($"Hit position limit: current={currentAxisPosition}, " +
-                                 $"min={minPosition}, max={maxPosition}, attempt={amount}");
+                                $"min={minPosition}, max={maxPosition}, attempt={amount}");
             }
             return;
         }
@@ -232,31 +357,32 @@ public class TranslationController : MonoBehaviour
     }
     
     /// <summary>
-    /// Map joystick raw value (0-255) to normalized range (-1 to 1)
+    /// Map joystick raw value (0-255) to normalized range (-1 to 1) with custom deadzone support
     /// </summary>
     private float MapJoystickValue(byte rawValue)
     {
-        // Define the deadzone range in terms of byte values
-        const byte deadZoneStart = 113;
-        const byte deadZoneEnd = 133;
+        // Select which deadzone values to use
+        byte dzStart = useCustomDeadzone ? deadZoneStart : DEFAULT_DEADZONE_START;
+        byte dzEnd = useCustomDeadzone ? deadZoneEnd : DEFAULT_DEADZONE_END;
+        byte centerVal = useCustomDeadzone ? centerValue : DEFAULT_CENTER_VALUE;
 
         // Check if the value is within the deadzone
-        if (rawValue >= deadZoneStart && rawValue <= deadZoneEnd)
+        if (rawValue >= dzStart && rawValue <= dzEnd)
         {
             // If within the deadzone, return 0.0
             return 0.0f;
         }
         
         // Otherwise, map the value to the desired output range
-        if (rawValue <= 123)
+        if (rawValue <= centerVal)
         {
-            // Map 0-123 to -1.0 to 0.0
-            return Mathf.Lerp(-1f, 0f, (rawValue / 123f));
+            // Map 0-centerVal to -1.0 to 0.0
+            return Mathf.Lerp(-1f, 0f, (rawValue / (float)centerVal));
         }
         else
         {
-            // Map 123-255 to 0.0 to 1.0
-            return Mathf.Lerp(0f, 1f, ((rawValue - 123) / 132f));
+            // Map centerVal-255 to 0.0 to 1.0
+            return Mathf.Lerp(0f, 1f, ((rawValue - centerVal) / (float)(255 - centerVal)));
         }
     }
 }

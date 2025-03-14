@@ -3,8 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Central manager for all input controls that distributes input from the BLE device
-/// to individual control components.
+/// Modified InputControlManager with improved button handling for multiple presses
 /// </summary>
 public class InputControlManager : MonoBehaviour
 {
@@ -15,7 +14,11 @@ public class InputControlManager : MonoBehaviour
     
     [Header("Debug")]
     [SerializeField] private bool debugMode = false;
+    [SerializeField] private BleInputReadout inputReadout;  // Using fixed version
     
+    [Header("Button Handling")]
+    [SerializeField] private bool correctButtonMapping = true;  // New option to fix button mapping
+
     // Lists to track all control components in the scene
     private List<RotationController> rotateControls = new List<RotationController>();
     private List<TranslationController> translateControls = new List<TranslationController>();
@@ -23,6 +26,9 @@ public class InputControlManager : MonoBehaviour
     // Input data from BLE device
     private byte[] joystickValues = new byte[10]; // Holds all joystick values (5 joysticks x 2 axes)
     private byte[] buttonSets = new byte[4];      // Holds all button set values (4 sets)
+    
+    // Raw data for debugging
+    private byte[] rawData = new byte[0];
     
     // Movement tracking for audio
     private Vector3[] lastPositions;
@@ -83,10 +89,14 @@ public class InputControlManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Receive input data from BLE device via InputReceiver
+    /// Receive input data from BLE device via InputReceiver with improved button handling
     /// </summary>
     public void ReceiveBytesArray(byte[] value)
     {
+        // Store raw data for debugging
+        rawData = new byte[value.Length];
+        System.Array.Copy(value, rawData, value.Length);
+        
         if (value.Length < 14)
         {
             Debug.LogError($"Received invalid data length: {value.Length}, expected at least 14 bytes");
@@ -99,10 +109,41 @@ public class InputControlManager : MonoBehaviour
             joystickValues[i] = value[i];
         }
         
-        // Copy button set values (next 4 bytes)
+        // Copy button set values with correct mapping if enabled
         for (int i = 0; i < 4 && i + 10 < value.Length; i++)
         {
-            buttonSets[i] = value[i + 10];
+            if (correctButtonMapping && i == 1)  // Only apply correction to button set 2
+            {
+                // Fix for button set 2 - apply bit shift correction if needed
+                // This handles the case where button 16 is showing as button 24
+                byte originalValue = value[i + 10];
+                
+                // Log the raw binary value if in debug mode
+                if (debugMode)
+                {
+                    Debug.Log($"Set {i+1} raw: {System.Convert.ToString(originalValue, 2).PadLeft(8, '0')}");
+                }
+                
+                // Fix the button mapping issue - bit shift or mask as needed
+                // In this case, we're handling the situation where button 16 (index 0) is showing as button 24 (index 3)
+                byte correctedValue = (byte)(
+                    ((originalValue & 0x08) >> 3) |    // Bit 3 → Bit 0
+                    ((originalValue & 0x04) >> 1) |    // Bit 2 → Bit 1 
+                    ((originalValue & 0x02) << 1) |    // Bit 1 → Bit 2
+                    ((originalValue & 0x01) << 3) |    // Bit 0 → Bit 3
+                    (originalValue & 0xF0));           // Keep high bits unchanged
+                
+                buttonSets[i] = correctedValue;
+                
+                if (debugMode)
+                {
+                    Debug.Log($"Set {i+1} corrected: {System.Convert.ToString(correctedValue, 2).PadLeft(8, '0')}");
+                }
+            }
+            else
+            {
+                buttonSets[i] = value[i + 10];
+            }
         }
         
         // Process input with all controllers
@@ -116,10 +157,46 @@ public class InputControlManager : MonoBehaviour
     }
     
     /// <summary>
+    /// Debug method to dump the full raw data received from BLE
+    /// </summary>
+    public void DumpRawData()
+    {
+        if (rawData.Length == 0)
+        {
+            Debug.Log("No raw data received yet");
+            return;
+        }
+        
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        sb.AppendLine("Raw BLE data dump:");
+        
+        for (int i = 0; i < rawData.Length; i++)
+        {
+            sb.AppendLine($"Byte {i}: {rawData[i]} (0x{rawData[i]:X2}) - Binary: {System.Convert.ToString(rawData[i], 2).PadLeft(8, '0')}");
+        }
+        
+        Debug.Log(sb.ToString());
+    }
+    
+    /// <summary>
+    /// Register a UI readout component for debugging
+    /// </summary>
+    public void RegisterReadout(BleInputReadout readout)
+    {
+        inputReadout = readout;
+    }
+
+    /// <summary>
     /// Distribute input data to all control components
     /// </summary>
     private void ProcessInput()
     {
+        // Update the readout display if available
+        if (debugMode && inputReadout != null)
+        {
+            inputReadout.UpdateInputValues(joystickValues, buttonSets);
+        }
+
         // Process rotation controllers
         foreach (var controller in rotateControls)
         {
